@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-23
+
+### Fixed
+
+- `ds-drift init` detection now looks inside hidden directories whose name
+  suggests generated tokens (`.design-sync/`), while still skipping other
+  hidden directories.
+
 ## [0.4.0] - 2026-08-23
 
 ### Added
