@@ -19,6 +19,18 @@ All notable changes to this project are documented here. The format follows
   `@theme`), Tailwind, Storybook, design-system dependencies, and the origin
   default branch, then asks for the fail threshold and writes the config.
   `--yes` accepts detected defaults; `--force` overwrites.
+- ESLint plugin (`ds-drift/eslint`): the same rules and config surfaced in the
+  editor at typing time, with a quick-fix for exact token duplicates.
+  `dsDrift.configs.recommended` for flat configs.
+- `--fix`: rewrites `color/hardcoded-exact-token` findings to the token
+  reference (`var(--token)`, `$variable` in SCSS), then re-checks.
+- Baseline workflow for legacy codebases: `--update-baseline` records current
+  findings in `.ds-drift.baseline.json`; later runs subtract them and report
+  the absorbed count.
+- Tailwind class scanning now covers `clsx`/`classnames`/`cn`/`cx`/`cva`/`tw`
+  calls, clsx object keys, and ternary branches in `className`.
+- `component/off-ds-import` also checks PascalCase namespace imports
+  (`import * as Icons from 'lucide-react'`).
 
 ### Changed
 

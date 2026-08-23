@@ -83,6 +83,42 @@ jobs:
 
 The job fails (exit `1`) when the drift score drops below `failUnder` (default 80).
 
+## In the editor (ESLint plugin)
+
+CI catches drift after the fact; the plugin puts the squiggle under `#3b82f6` while you type. Same rules, same config file:
+
+```js
+// eslint.config.js
+import dsDrift from 'ds-drift/eslint'
+
+export default [
+  // ...your existing config
+  dsDrift.configs.recommended,
+]
+```
+
+Or wire it manually: `plugins: { 'ds-drift': dsDrift }` with `rules: { 'ds-drift/drift': 'warn' }`.
+
+- Covers `.tsx`, `.jsx`, `.ts`, `.js`; stylesheets stay with the CLI.
+- Exact token duplicates come with an editor quick-fix that rewrites to the token reference.
+- Each linted file resolves its nearest ds-drift config (monorepo-friendly); the rule stays silent in projects that have none. A `.mjs` config can't be loaded synchronously, so use `.ts`, `.js`, or `.json`.
+- `ds-drift-ignore` comments apply, and ESLint's own `eslint-disable` works as usual.
+
+## Autofix
+
+`ds-drift --fix` rewrites every `color/hardcoded-exact-token` finding to its token reference (`var(--color-primary)`, or the `$variable` in SCSS), then re-checks. Exact duplicates are the only mechanical, always-safe rewrite; near-token and off-scale findings need human judgment and are never touched.
+
+## Adopting on a legacy codebase
+
+A first `--all` run on an old codebase can return hundreds of findings and a score of 0. Record the existing drift once; from then on only new drift counts:
+
+```sh
+pnpm ds-drift --all --update-baseline   # writes .ds-drift.baseline.json
+git add .ds-drift.baseline.json
+```
+
+Runs subtract baselined findings (reported as `N baselined finding(s) hidden`) and the score reflects only the rest. Fingerprints skip line numbers, so moving code never resurfaces an accepted finding; one more occurrence of the same value than the recorded count is reported again. The file path is configurable via `baseline`.
+
 ## How it works
 
 1. Tokens are read from your `.css`/`.scss` custom properties, Sass `$variables`, and W3C `.json` files, then classified as `color`, `spacing`, or `other`.
@@ -150,6 +186,8 @@ Set `tailwind: true` in the config (`ds-drift init` offers it when `tailwindcss`
 
 Spacing utilities (`p-`, `m-`, `gap-`, `inset-`, negatives, variants like `hover:` or `md:`) map to their CSS property before the spacing rule runs; underscores in bracket values are decoded (`bg-[rgb(59_130_246)]`); opacity modifiers are handled (`bg-[#3b82f6]/50` still duplicates the token, since `bg-primary/50` exists). Lengths on non-spacing utilities (`w-[13px]`, `text-[14px]`) are left alone.
 
+Class strings are found in `className`/`class` attributes (strings, templates, ternaries) and inside builder calls: `clsx`, `classnames`, `cn`, `cx`, `cva`, `tw`, including clsx object keys (`{ 'gap-[7px]': active }`) and cva variant maps.
+
 Tailwind v4 defines the theme as CSS custom properties in an `@theme` block: list that CSS file in `tokens` and both color and spacing rules compare against your actual theme. For a flagged class, the fix is the matching theme utility (`bg-primary`) or a token-based arbitrary value (`bg-(--color-primary)`).
 
 ## Sass
@@ -187,6 +225,8 @@ failUnder: 80,
 weights: { 'color/hardcoded-exact-token': 10 },
 ```
 
+The score is absolute per run: a large PR accumulates more penalty than a small one. Treat it as a budget per change, not a quality percentage, and tune `failUnder` per repository.
+
 ## Configuration
 
 `ds-drift.config.ts` / `.js` / `.json` (or a `ds-drift` key in `package.json`), discovered with cosmiconfig. All paths are relative to the config file.
@@ -201,6 +241,7 @@ weights: { 'color/hardcoded-exact-token': 10 },
 | `weights` | see rules table | Score penalty per rule |
 | `rules` | all enabled | Per-rule enable/disable |
 | `ignore` | `[]` | Glob patterns to skip |
+| `baseline` | `.ds-drift.baseline.json` | Baseline file subtracted from every run |
 | `dsPackages` | unset (rule off) | Design system package patterns |
 | `tailwind` | `false` | Scan arbitrary values in class attributes and `@apply` |
 | `sass` | `{ variables: true }` | Read `$variables` from token files |
@@ -219,17 +260,15 @@ Exit codes: `0` score at or above threshold, `1` below threshold, `2` error (bad
 
 - Analyzes `.css`, `.scss`, `.tsx`, `.jsx`. Values built from template interpolations (`${...}`) are skipped.
 - Named colors (`red`, `rebeccapurple`) are not flagged; the color rules target hex, `rgb()`, and `hsl()` notation.
-- Class names built through `clsx`/`cva` calls are not scanned yet; only literal `className` strings and template chunks are.
 - No Vue/Svelte support yet. The `Rule` and parser interfaces are designed for extension; see [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## Roadmap
 
 Ordered by day-to-day impact, not by novelty:
 
-- `--fix` for exact token duplicates (a mechanical rewrite; near-token and spacing fixes need human judgment).
-- An ESLint plugin exposing the same rules, so findings appear in the editor at typing time instead of at CI time.
-- A baseline file (`--update-baseline`) so legacy codebases can adopt `--all` mode without a day-one score of 0.
-- `clsx`/`cva` call scanning for Tailwind class names.
+- Vue and Svelte parsers.
+- Score normalization options for very large changes.
+- A Stylelint companion for pure-CSS editor feedback.
 
 ## Contributing
 
