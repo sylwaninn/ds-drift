@@ -1,0 +1,5 @@
+{
+  "tokens": ["../tokens.css"],
+  "tailwind": true,
+  "dsPackages": ["@acme/ui", "@acme/ui/*"]
+}
