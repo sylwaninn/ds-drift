@@ -52,4 +52,11 @@ jobs:
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag
+        # Idempotent: a re-run (e.g. after adding NPM_TOKEN) must not fail on
+        # the release created by the first run.
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists; skipping."
+          else
+            gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag
+          fi

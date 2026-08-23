@@ -18,7 +18,7 @@
     "node": ">=20"
   },
   "bin": {
-    "ds-drift": "./dist/cli.js"
+    "ds-drift": "dist/cli.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
