@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-23
+
+### Fixed
+
+- Crash at startup (`z.partialRecord is not a function`) when a monorepo
+  override resolves ds-drift against an older zod 4.x. The config schema no
+  longer uses `z.partialRecord`; rule-id keys are validated manually, so any
+  reasonably recent zod works at runtime.
+
 ## [0.2.0] - 2026-08-23
 
 ### Added
