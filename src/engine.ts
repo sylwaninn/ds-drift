@@ -12,8 +12,13 @@ import { computeScore } from './score.js'
 import type { ResolvedConfig } from './config.js'
 import type { Candidate, Finding } from './types.js'
 
-const SUPPORTED_EXT = new Set(['.css', '.scss', '.tsx', '.jsx'])
+const SUPPORTED_EXT = new Set(['.css', '.scss', '.tsx', '.jsx', '.ts', '.js'])
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'coverage'])
+
+/** Analyzable file, excluding declaration files (type-world, no real values). */
+function isAnalyzable(rel: string): boolean {
+  return SUPPORTED_EXT.has(extname(rel).toLowerCase()) && !rel.endsWith('.d.ts')
+}
 
 export interface RunOptions {
   /** Scan whole files instead of only lines added in the diff. */
@@ -62,12 +67,7 @@ export async function run(config: ResolvedConfig, options: RunOptions = {}): Pro
 
   const tokenFiles = new Set(config.tokenFiles)
   const isIgnored = config.ignore.length > 0 ? picomatch(config.ignore, { dot: true }) : () => false
-  targets = targets.filter(
-    (t) =>
-      SUPPORTED_EXT.has(extname(t.rel).toLowerCase()) &&
-      !tokenFiles.has(t.abs) &&
-      !isIgnored(t.rel),
-  )
+  targets = targets.filter((t) => isAnalyzable(t.rel) && !tokenFiles.has(t.abs) && !isIgnored(t.rel))
 
   const parserOptions = { tailwind: config.tailwind.enabled }
   const candidates: Candidate[] = []

@@ -24,6 +24,11 @@ beforeAll(async () => {
   await cp(fixture('tokens.css'), join(dir, 'tokens.css'))
   await cp(fixture('Widget.tsx'), join(dir, 'src/Widget.tsx'), { recursive: true })
   await writeFile(join(dir, 'src/drift.css'), DRIFT_CSS)
+  await writeFile(
+    join(dir, 'src/styled.ts'),
+    "import styled from 'styled-components'\nexport const Box = styled.div`\n  color: #3b82f6;\n`\n",
+  )
+  await writeFile(join(dir, 'src/types.d.ts'), "import { Card } from '@mui/material'\n")
   await mkdir(join(dir, 'skipme'), { recursive: true })
   await writeFile(join(dir, 'skipme/bad.css'), '.x { color: #3b82f6; }\n')
   const config = resolveConfig(
@@ -42,10 +47,16 @@ afterAll(async () => {
 })
 
 describe('engine --all run', () => {
-  it('excludes token files and ignored globs from scanning', () => {
-    expect(result.filesScanned).toBe(2)
+  it('excludes token files, declaration files and ignored globs from scanning', () => {
+    expect(result.filesScanned).toBe(3)
     expect(result.findings.every((f) => f.file !== 'tokens.css')).toBe(true)
     expect(result.findings.every((f) => !f.file.startsWith('skipme/'))).toBe(true)
+    expect(result.findings.every((f) => !f.file.endsWith('.d.ts'))).toBe(true)
+  })
+
+  it('analyzes plain .ts files (styled-components outside components)', () => {
+    const styled = result.findings.filter((f) => f.file === 'src/styled.ts')
+    expect(styled.map((f) => [f.ruleId, f.line])).toEqual([['color/hardcoded-exact-token', 3]])
   })
 
   it('applies line-level ignores across css and tsx', () => {
