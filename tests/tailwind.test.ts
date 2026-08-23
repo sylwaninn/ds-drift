@@ -108,6 +108,12 @@ export const Chip = (props: { active: boolean }) => (
     ])
   })
 
+  it('scans twMerge/twJoin arguments', () => {
+    const source = `const x = twMerge('p-[13px]', props.className)\n`
+    const candidates = extractTsxCandidates(source, 'X.tsx', { tailwind: true })
+    expect(candidates.map((c) => c.value)).toEqual(['13px'])
+  })
+
   it('does not double-count a cn() call inside className', () => {
     const source = `const x = <a className={cn('p-[13px]')} />\n`
     const candidates = extractTsxCandidates(source, 'X.tsx', { tailwind: true })

@@ -21,7 +21,7 @@ function getProject(): Project {
 const STYLED_TAG_RE = /^(styled|css|keyframes|createGlobalStyle)\b/
 const TEMPLATE_PROP_RE = /^\s*([a-zA-Z-]+)\s*:/
 /** Class-name builder calls whose string arguments are scanned for Tailwind values. */
-const CLASS_CALL_RE = /^(clsx|classnames|classNames|cn|cx|cva|tw)$/
+const CLASS_CALL_RE = /^(clsx|classnames|classNames|cn|cx|cva|tw|twMerge|twJoin)$/
 
 /**
  * Extract candidates from TSX/JSX source: imports, inline style objects,
