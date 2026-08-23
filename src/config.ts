@@ -19,7 +19,27 @@ export const DEFAULT_WEIGHTS: Record<RuleId, number> = {
   'component/off-ds-import': 4,
 }
 
-const ruleIdSchema = z.enum(RULE_IDS)
+/**
+ * Record keyed by rule ids. Hand-rolled instead of z.partialRecord: that API
+ * only exists in recent zod 4.x, and monorepo overrides can resolve ds-drift
+ * against an older zod at runtime.
+ */
+function ruleRecord<V>(valueSchema: z.ZodType<V>) {
+  return z
+    .record(z.string(), valueSchema)
+    .superRefine((value, ctx) => {
+      for (const key of Object.keys(value)) {
+        if (!(RULE_IDS as readonly string[]).includes(key)) {
+          ctx.addIssue({
+            code: 'custom',
+            message: `Unknown rule id "${key}". Known rules: ${RULE_IDS.join(', ')}`,
+            path: [key],
+          })
+        }
+      }
+    })
+    .transform((value) => value as Partial<Record<RuleId, V>>)
+}
 
 const configSchema = z.object({
   /** Token source files (.css, .scss, or W3C .json), relative to the config file. */
@@ -33,9 +53,9 @@ const configSchema = z.object({
   /** Tolerance in px when snapping lengths to the spacing scale. */
   spacingTolerancePx: z.number().nonnegative().default(0.5),
   /** Score subtracted per finding, per rule. Merged over built-in defaults. */
-  weights: z.partialRecord(ruleIdSchema, z.number().nonnegative()).default({}),
+  weights: ruleRecord(z.number().nonnegative()).default({}),
   /** Per-rule enable/disable, e.g. { "spacing/off-scale": false }. */
-  rules: z.partialRecord(ruleIdSchema, z.boolean()).default({}),
+  rules: ruleRecord(z.boolean()).default({}),
   /** Glob patterns of files to skip entirely. */
   ignore: z.array(z.string()).default([]),
   /** Baseline file (relative to the config); written by --update-baseline, subtracted from runs. */
