@@ -24,14 +24,19 @@ export async function gitRoot(cwd: string): Promise<string> {
   }
 }
 
-/** Lines added between base and HEAD (`git diff -U0 <base>...HEAD`). */
+/**
+ * Lines added since the merge-base with `base`. Diffs against the working tree
+ * (not HEAD), so staged and unstaged edits count; untracked files count as
+ * fully added. Drift is visible before anything is committed.
+ */
 export async function changedLines(base: string, cwd: string): Promise<ChangedLines> {
   let stdout: string
   try {
+    const { stdout: mb } = await exec('git', ['merge-base', base, 'HEAD'], { cwd })
     ;({ stdout } = await exec(
       'git',
       // quotepath=off keeps non-ASCII paths readable in the +++ headers
-      ['-c', 'core.quotepath=off', 'diff', '-U0', '--no-color', '--diff-filter=ACMR', `${base}...HEAD`],
+      ['-c', 'core.quotepath=off', 'diff', '-U0', '--no-color', '--diff-filter=ACMR', mb.trim()],
       { cwd, maxBuffer: 64 * 1024 * 1024 },
     ))
   } catch (error) {
@@ -40,7 +45,17 @@ export async function changedLines(base: string, cwd: string): Promise<ChangedLi
       cause: error,
     })
   }
-  return parseUnifiedDiff(stdout)
+  const changed = parseUnifiedDiff(stdout)
+  const { stdout: untracked } = await exec(
+    'git',
+    ['-c', 'core.quotepath=off', 'ls-files', '--others', '--exclude-standard', '--full-name'],
+    { cwd, maxBuffer: 16 * 1024 * 1024 },
+  )
+  for (const line of untracked.split('\n')) {
+    const path = line.trim()
+    if (path !== '') changed.set(path, [{ start: 1, end: Number.MAX_SAFE_INTEGER }])
+  }
+  return changed
 }
 
 const HUNK_RE = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/

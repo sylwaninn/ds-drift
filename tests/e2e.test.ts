@@ -82,6 +82,23 @@ describe('ds-drift CLI end to end', () => {
     expect(report).toMatchSnapshot()
   }, 30_000)
 
+  it('sees uncommitted and untracked drift before any commit', async () => {
+    await writeFile(join(repo, 'src/existing.css'), `${FEATURE_CSS}.wip {\n  color: #3b82f6;\n}\n`)
+    await writeFile(join(repo, 'src/Untracked.css'), '.u {\n  margin: 13px;\n}\n')
+    try {
+      const { stdout } = await exec('node', [cliPath, '--format', 'json'], { cwd: repo }).catch(
+        (e: { stdout: string }) => e,
+      )
+      const report = JSON.parse(stdout)
+      const files = report.findings.map((f: { file: string; line: number }) => `${f.file}:${f.line}`)
+      expect(files).toContain('src/existing.css:10') // unstaged edit
+      expect(files).toContain('src/Untracked.css:2') // untracked file
+    } finally {
+      await writeFile(join(repo, 'src/existing.css'), FEATURE_CSS)
+      await rm(join(repo, 'src/Untracked.css'), { force: true })
+    }
+  }, 30_000)
+
   it('exits 1 when the score falls below the threshold', async () => {
     await writeFile(
       join(repo, 'ds-drift.config.json'),
