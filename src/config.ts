@@ -1,5 +1,5 @@
 import { dirname, resolve } from 'node:path'
-import { cosmiconfig, type Loader } from 'cosmiconfig'
+import { cosmiconfig, cosmiconfigSync, type Loader, type LoaderSync } from 'cosmiconfig'
 import { createJiti } from 'jiti'
 import { z } from 'zod'
 
@@ -38,6 +38,8 @@ const configSchema = z.object({
   rules: z.partialRecord(ruleIdSchema, z.boolean()).default({}),
   /** Glob patterns of files to skip entirely. */
   ignore: z.array(z.string()).default([]),
+  /** Baseline file (relative to the config); written by --update-baseline, subtracted from runs. */
+  baseline: z.string().default('.ds-drift.baseline.json'),
   /**
    * Design system package patterns (e.g. "@acme/ui", "@acme/ui/*").
    * component/off-ds-import only runs when this is set.
@@ -81,16 +83,32 @@ const tsLoader: Loader = async (filepath) => {
   return record.default ?? mod
 }
 
+// jiti instances are also callable synchronously (CommonJS-style transform).
+const tsLoaderSync: LoaderSync = (filepath) => {
+  const jiti = createJiti(import.meta.url, { interopDefault: true })
+  const mod = jiti(filepath) as Record<string, unknown>
+  return mod.default ?? mod
+}
+
+const SEARCH_PLACES = [
+  'ds-drift.config.ts',
+  'ds-drift.config.js',
+  'ds-drift.config.mjs',
+  'ds-drift.config.cjs',
+  'ds-drift.config.json',
+  'package.json',
+]
+
 const explorer = cosmiconfig('ds-drift', {
-  searchPlaces: [
-    'ds-drift.config.ts',
-    'ds-drift.config.js',
-    'ds-drift.config.mjs',
-    'ds-drift.config.cjs',
-    'ds-drift.config.json',
-    'package.json',
-  ],
+  searchPlaces: SEARCH_PLACES,
   loaders: { '.ts': tsLoader },
+})
+
+// No .mjs here: ESM can't be loaded synchronously. jiti transforms .ts/.js/.cjs
+// (ESM syntax included) in-process, which covers every other config flavor.
+const explorerSync = cosmiconfigSync('ds-drift', {
+  searchPlaces: SEARCH_PLACES.filter((place) => !place.endsWith('.mjs')),
+  loaders: { '.ts': tsLoaderSync, '.js': tsLoaderSync, '.cjs': tsLoaderSync },
 })
 
 export interface LoadConfigOptions {
@@ -105,6 +123,18 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Resol
   const result = options.configPath
     ? await explorer.load(resolve(cwd, options.configPath))
     : await explorer.search(cwd)
+  if (!result || result.isEmpty) {
+    throw new Error('No ds-drift config found. Run `ds-drift init` to create one.')
+  }
+  return resolveConfig(result.config, dirname(result.filepath))
+}
+
+/** Synchronous variant of loadConfig, for callers that cannot await (e.g. ESLint rules). */
+export function loadConfigSync(options: LoadConfigOptions = {}): ResolvedConfig {
+  const cwd = options.cwd ?? process.cwd()
+  const result = options.configPath
+    ? explorerSync.load(resolve(cwd, options.configPath))
+    : explorerSync.search(cwd)
   if (!result || result.isEmpty) {
     throw new Error('No ds-drift config found. Run `ds-drift init` to create one.')
   }

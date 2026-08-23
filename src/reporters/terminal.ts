@@ -13,6 +13,10 @@ export function renderTerminal(result: RunResult, config: ResolvedConfig): strin
   const scoreLine = result.passed
     ? `Drift score: ${result.score}/100 (threshold ${config.failUnder})`
     : `Drift score: ${result.score}/100, below threshold ${config.failUnder}`
+  if (result.baselined > 0) {
+    lines.push(pc.dim(`${result.baselined} baselined finding(s) hidden (${config.baseline})`))
+    lines.push('')
+  }
   if (result.findings.length === 0) {
     lines.push(pc.green('✔ No design system drift detected.'))
     lines.push(pc.green(scoreLine))

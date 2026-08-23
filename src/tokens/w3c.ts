@@ -9,7 +9,11 @@ import type { DesignToken } from './types.js'
  * `color` values as strings. Unsupported shapes classify as `other`.
  */
 export async function loadW3cTokens(file: string): Promise<DesignToken[]> {
-  const doc: unknown = JSON.parse(await readFile(file, 'utf8'))
+  return w3cTokensFromSource(await readFile(file, 'utf8'), file)
+}
+
+export function w3cTokensFromSource(source: string, file: string): DesignToken[] {
+  const doc: unknown = JSON.parse(source)
   if (!isRecord(doc)) throw new Error(`${file}: expected a JSON object at the root`)
   const tokens: DesignToken[] = []
   walk(doc, [], undefined, doc, file, tokens)

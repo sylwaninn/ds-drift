@@ -1,6 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { extname, join, relative, resolve, sep } from 'node:path'
 import picomatch from 'picomatch'
+import { applyBaseline, readBaseline } from './baseline.js'
 import { changedLines, gitRoot, isLineChanged, type ChangedRange } from './diff.js'
 import { buildIgnoreMap, isSuppressed, type IgnoreMap } from './ignores.js'
 import { loadTokens } from './tokens/index.js'
@@ -17,6 +18,8 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'coverage'])
 export interface RunOptions {
   /** Scan whole files instead of only lines added in the diff. */
   all?: boolean
+  /** Set false to skip subtracting the baseline file (used when rewriting it). */
+  baseline?: boolean
 }
 
 export interface RunResult {
@@ -25,6 +28,8 @@ export interface RunResult {
   /** Base ref used in diff mode. */
   base?: string
   filesScanned: number
+  /** Findings absorbed by the baseline file. */
+  baselined: number
   /** Drift score 0-100. */
   score: number
   /** score >= config.failUnder */
@@ -79,16 +84,23 @@ export async function run(config: ResolvedConfig, options: RunOptions = {}): Pro
 
   const enabledRules = allRules.filter((rule) => config.rules[rule.id] !== false)
   const context = { candidates, tokens, config }
-  const findings = enabledRules
+  let findings = enabledRules
     .flatMap((rule) => rule.check(context))
     .filter((f) => !isSuppressed(ignoreMaps.get(f.file), f.line, f.ruleId))
     .sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.column - b.column)
+
+  let baselined = 0
+  if (options.baseline !== false) {
+    const baseline = await readBaseline(resolve(config.rootDir, config.baseline))
+    if (baseline !== undefined) ({ findings, baselined } = applyBaseline(findings, baseline))
+  }
 
   const score = computeScore(findings, config.weights)
   const result: RunResult = {
     findings,
     mode,
     filesScanned: targets.length,
+    baselined,
     score,
     passed: score >= config.failUnder,
   }

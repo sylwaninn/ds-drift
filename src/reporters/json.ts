@@ -14,7 +14,7 @@ export interface JsonReport {
   mode: 'diff' | 'all'
   base?: string
   filesScanned: number
-  summary: { total: number; byRule: Record<string, number> }
+  summary: { total: number; byRule: Record<string, number>; baselined: number }
   findings: Array<{
     ruleId: string
     file: string
@@ -39,7 +39,7 @@ export function buildJsonReport(result: RunResult, config: ResolvedConfig): Json
     passed: result.passed,
     mode: result.mode,
     filesScanned: result.filesScanned,
-    summary: { total: result.findings.length, byRule },
+    summary: { total: result.findings.length, byRule, baselined: result.baselined },
     findings: result.findings.map((f) => ({ ...f, weight: config.weights[f.ruleId] })),
   }
   if (result.base !== undefined) report.base = result.base

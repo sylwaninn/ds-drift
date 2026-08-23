@@ -51,6 +51,7 @@ exports[`ds-drift CLI end to end > reports only drift added in the diff, as stab
   "schemaVersion": 1,
   "score": 87,
   "summary": {
+    "baselined": 0,
     "byRule": {
       "color/hardcoded-exact-token": 1,
       "component/off-ds-import": 1,

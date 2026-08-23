@@ -17,7 +17,14 @@ export async function loadCssTokens(
   file: string,
   options: CssTokenOptions = { scssVariables: true },
 ): Promise<DesignToken[]> {
-  const source = await readFile(file, 'utf8')
+  return cssTokensFromSource(await readFile(file, 'utf8'), file, options)
+}
+
+export function cssTokensFromSource(
+  source: string,
+  file: string,
+  options: CssTokenOptions = { scssVariables: true },
+): DesignToken[] {
   const root = scss.parse(source, { from: file })
   const seen = new Set<string>()
   const tokens: DesignToken[] = []

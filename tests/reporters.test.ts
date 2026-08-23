@@ -34,6 +34,7 @@ const result: RunResult = {
   mode: 'diff',
   base: 'origin/main',
   filesScanned: 1,
+  baselined: 0,
   score: 93,
   passed: true,
 }
