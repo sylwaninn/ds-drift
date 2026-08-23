@@ -6,6 +6,24 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-23
+
+### Added
+
+- `ds-drift init` always offers manual path entry ("Enter another path…",
+  comma-separated) alongside the detected list, and each proposal shows why
+  it was detected (token count, color literals, or name match).
+- Theme-named JS/TS modules without literal colors are proposed too,
+  low-ranked and labeled: real values may live behind imports.
+
+### Changed
+
+- Detection ranking: token declarations are weighted by their density in the
+  file and token-ish filenames get a bonus, so a dedicated theme-tokens file
+  outranks a generated bundle. Tailwind's internal `--tw-*` variables no
+  longer count. Components (.tsx/.jsx) and `use-*` hooks are never proposed
+  on name alone.
+
 ## [0.4.1] - 2026-08-23
 
 ### Fixed
