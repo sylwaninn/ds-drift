@@ -1,0 +1,76 @@
+{
+  "name": "ds-drift",
+  "version": "0.1.0",
+  "description": "Design system drift detector for AI-generated frontend code",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sylwaninn/ds-drift.git"
+  },
+  "homepage": "https://github.com/sylwaninn/ds-drift#readme",
+  "bugs": {
+    "url": "https://github.com/sylwaninn/ds-drift/issues"
+  },
+  "sideEffects": false,
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "ds-drift": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "pnpm lint && pnpm typecheck && pnpm build && pnpm test"
+  },
+  "keywords": [
+    "design-system",
+    "design-tokens",
+    "design-token-linter",
+    "drift",
+    "lint",
+    "ci",
+    "ai-generated-code",
+    "styled-components",
+    "css-custom-properties"
+  ],
+  "dependencies": {
+    "cac": "^7.0.0",
+    "cosmiconfig": "^10.0.0",
+    "culori": "^4.0.2",
+    "jiti": "^2.7.0",
+    "picocolors": "^1.1.1",
+    "picomatch": "^4.0.5",
+    "postcss": "^8.5.26",
+    "postcss-scss": "^4.0.9",
+    "ts-morph": "^28.0.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/culori": "^4.0.1",
+    "@types/node": "^26.2.0",
+    "@types/picomatch": "^4.0.3",
+    "eslint": "^10.9.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.67.0",
+    "vitest": "^4.1.11"
+  }
+}

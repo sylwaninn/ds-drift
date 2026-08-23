@@ -1,0 +1,62 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ds-drift CLI end to end > reports only drift added in the diff, as stable JSON 1`] = `
+{
+  "base": "main",
+  "failUnder": 80,
+  "filesScanned": 2,
+  "findings": [
+    {
+      "column": 10,
+      "file": "src/existing.css",
+      "found": "#3b82f6",
+      "line": 6,
+      "message": "#3b82f6 duplicates token --color-primary. Use var(--color-primary)",
+      "ruleId": "color/hardcoded-exact-token",
+      "suggestion": "var(--color-primary)",
+      "weight": 5,
+    },
+    {
+      "column": 11,
+      "file": "src/existing.css",
+      "found": "13px",
+      "line": 7,
+      "message": "13px is off the spacing scale. Nearest token: --spacing-4 (16px)",
+      "ruleId": "spacing/off-scale",
+      "suggestion": "var(--spacing-4)",
+      "weight": 2,
+    },
+    {
+      "column": 1,
+      "file": "src/New.tsx",
+      "found": "@radix-ui/themes",
+      "line": 1,
+      "message": "Dialog imported from "@radix-ui/themes". Expected a design system package (@acme/ui, @acme/ui/*)",
+      "ruleId": "component/off-ds-import",
+      "weight": 4,
+    },
+    {
+      "column": 41,
+      "file": "src/New.tsx",
+      "found": "7px",
+      "line": 5,
+      "message": "7px is off the spacing scale. Nearest token: --spacing-2 (8px)",
+      "ruleId": "spacing/off-scale",
+      "suggestion": "var(--spacing-2)",
+      "weight": 2,
+    },
+  ],
+  "mode": "diff",
+  "passed": true,
+  "schemaVersion": 1,
+  "score": 87,
+  "summary": {
+    "byRule": {
+      "color/hardcoded-exact-token": 1,
+      "component/off-ds-import": 1,
+      "spacing/off-scale": 2,
+    },
+    "total": 4,
+  },
+}
+`;
