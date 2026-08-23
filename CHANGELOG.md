@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-23
+
+### Added
+
+- Monorepo detection: `ds-drift init` follows workspace dependencies
+  (node_modules entries symlinked outside node_modules) and scans their
+  `src/` for token files, proposing them with the package name in the hint
+  (`../../packages/shared/src/design/palette.ts · @acme/shared`).
+- Files inside a design tokens directory (`design/`, `tokens/`, `theme/`,
+  `foundations/`) are proposed even without token-ish filenames
+  (spacing.ts, radius.ts); test/spec/stories files are excluded.
+
 ## [0.5.0] - 2026-08-23
 
 ### Added
