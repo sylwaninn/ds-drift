@@ -52,6 +52,14 @@ describe('TSX candidate extraction', () => {
     expect(candidates.some((c) => c.value.includes('props'))).toBe(false)
   })
 
+  it('collects PascalCase namespace imports', () => {
+    const source = `import * as Icons from 'lucide-react'\nimport * as helpers from './helpers'\n`
+    const candidates = extractTsxCandidates(source, 'N.tsx')
+    expect(candidates).toEqual([
+      expect.objectContaining({ kind: 'import', value: 'lucide-react', importNames: ['Icons'] }),
+    ])
+  })
+
   it('ignores var() references in templates', async () => {
     const candidates = await fixtureCandidates()
     expect(candidates.some((c) => c.line === 14 && c.kind === 'color')).toBe(false)

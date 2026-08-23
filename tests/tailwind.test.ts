@@ -82,6 +82,39 @@ describe('tailwind in TSX class attributes', () => {
   })
 })
 
+describe('tailwind in class-name builder calls', () => {
+  const SOURCE = `import { cn } from './utils'
+import { cva } from 'class-variance-authority'
+
+const button = cva('rounded p-[13px]', {
+  variants: { tone: { brand: 'bg-[#3b82f6]', plain: 'bg-white' } },
+})
+
+export const Chip = (props: { active: boolean }) => (
+  <div className={cn('base', props.active && 'm-[9px]', { 'gap-[7px]': props.active })}>
+    <span className={props.active ? 'pt-[5px]' : 'pt-2'} />
+  </div>
+)
+`
+
+  it('scans cn()/cva() arguments, object keys and ternary branches', () => {
+    const candidates = extractTsxCandidates(SOURCE, 'Chip.tsx', { tailwind: true })
+    expect(candidates.map((c) => c.value).sort()).toEqual([
+      '#3b82f6',
+      '13px',
+      '5px',
+      '7px',
+      '9px',
+    ])
+  })
+
+  it('does not double-count a cn() call inside className', () => {
+    const source = `const x = <a className={cn('p-[13px]')} />\n`
+    const candidates = extractTsxCandidates(source, 'X.tsx', { tailwind: true })
+    expect(candidates).toHaveLength(1)
+  })
+})
+
 describe('tailwind in @apply directives', () => {
   const SOURCE = `.btn {
   @apply p-[13px] bg-[#3b82f6] rounded;

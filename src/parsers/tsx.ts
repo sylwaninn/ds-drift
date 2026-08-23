@@ -20,6 +20,8 @@ function getProject(): Project {
 
 const STYLED_TAG_RE = /^(styled|css|keyframes|createGlobalStyle)\b/
 const TEMPLATE_PROP_RE = /^\s*([a-zA-Z-]+)\s*:/
+/** Class-name builder calls whose string arguments are scanned for Tailwind values. */
+const CLASS_CALL_RE = /^(clsx|classnames|classNames|cn|cx|cva|tw)$/
 
 /**
  * Extract candidates from TSX/JSX source: imports, inline style objects,
@@ -34,6 +36,9 @@ export function extractTsxCandidates(
   const sourceFile = project.createSourceFile(`/virtual/${label}`, source, { overwrite: true })
   try {
     const candidates: Candidate[] = []
+    // Class strings can be reached twice (a cn() call inside className);
+    // chunk offsets dedupe the scans.
+    const seen = new Set<number>()
     collectImports(sourceFile, label, candidates)
     sourceFile.forEachDescendant((node) => {
       if (Node.isJsxAttribute(node)) {
@@ -45,7 +50,14 @@ export function extractTsxCandidates(
             collectStyleObject(expression, sourceFile, label, candidates)
           }
         } else if (options.tailwind === true && (name === 'className' || name === 'class')) {
-          collectClassAttribute(node, sourceFile, label, candidates)
+          collectClassAttribute(node, sourceFile, label, seen, candidates)
+        }
+      } else if (options.tailwind === true && Node.isCallExpression(node)) {
+        const callee = node.getExpression()
+        if (Node.isIdentifier(callee) && CLASS_CALL_RE.test(callee.getText())) {
+          for (const argument of node.getArguments()) {
+            collectClassStrings(argument, sourceFile, label, seen, candidates)
+          }
         }
       } else if (Node.isTaggedTemplateExpression(node)) {
         collectTaggedTemplate(node, sourceFile, label, candidates)
@@ -61,24 +73,32 @@ function collectClassAttribute(
   attribute: JsxAttribute,
   sourceFile: SourceFile,
   label: string,
+  seen: Set<number>,
   out: Candidate[],
 ): void {
   const initializer = attribute.getInitializer()
   const expression = Node.isJsxExpression(initializer) ? initializer.getExpression() : initializer
   if (expression === undefined) return
-  const chunks: Array<{ text: string; offset: number }> = []
-  if (Node.isStringLiteral(expression) || Node.isNoSubstitutionTemplateLiteral(expression)) {
-    chunks.push({ text: expression.getLiteralText(), offset: expression.getStart() + 1 })
-  } else if (Node.isTemplateExpression(expression)) {
-    chunks.push({ text: expression.getHead().getLiteralText(), offset: expression.getHead().getStart() + 1 })
-    for (const span of expression.getTemplateSpans()) {
-      const literal = span.getLiteral()
-      chunks.push({ text: literal.getLiteralText(), offset: literal.getStart() + 1 })
-    }
-  }
-  for (const chunk of chunks) {
-    for (const match of scanTailwindClasses(chunk.text)) {
-      const pos = sourceFile.getLineAndColumnAtPos(chunk.offset + match.index)
+  collectClassStrings(expression, sourceFile, label, seen, out)
+}
+
+/**
+ * Scan every string literal and template chunk reachable under `node` for
+ * Tailwind arbitrary values. Covers plain strings, templates, ternaries,
+ * clsx-style object keys, and cva variant maps.
+ */
+function collectClassStrings(
+  node: Node,
+  sourceFile: SourceFile,
+  label: string,
+  seen: Set<number>,
+  out: Candidate[],
+): void {
+  const scanChunk = (text: string, offset: number): void => {
+    if (seen.has(offset)) return
+    seen.add(offset)
+    for (const match of scanTailwindClasses(text)) {
+      const pos = sourceFile.getLineAndColumnAtPos(offset + match.index)
       const candidate: Candidate = {
         kind: match.kind,
         value: match.value,
@@ -90,6 +110,18 @@ function collectClassAttribute(
       out.push(candidate)
     }
   }
+  const visit = (n: Node): void => {
+    if (Node.isStringLiteral(n) || Node.isNoSubstitutionTemplateLiteral(n)) {
+      scanChunk(n.getLiteralText(), n.getStart() + 1)
+    } else if (Node.isTemplateExpression(n)) {
+      scanChunk(n.getHead().getLiteralText(), n.getHead().getStart() + 1)
+      for (const span of n.getTemplateSpans()) {
+        scanChunk(span.getLiteral().getLiteralText(), span.getLiteral().getStart() + 1)
+      }
+    }
+  }
+  visit(node)
+  node.forEachDescendant(visit)
 }
 
 function collectImports(sourceFile: SourceFile, label: string, out: Candidate[]): void {
@@ -99,6 +131,10 @@ function collectImports(sourceFile: SourceFile, label: string, out: Candidate[])
     const defaultImport = declaration.getDefaultImport()
     if (defaultImport !== undefined && /^[A-Z]/.test(defaultImport.getText())) {
       names.push(defaultImport.getText())
+    }
+    const namespaceImport = declaration.getNamespaceImport()
+    if (namespaceImport !== undefined && /^[A-Z]/.test(namespaceImport.getText())) {
+      names.push(namespaceImport.getText())
     }
     for (const named of declaration.getNamedImports()) {
       if (named.isTypeOnly()) continue
