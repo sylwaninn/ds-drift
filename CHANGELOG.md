@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-23
+
+### Added
+
+- Bare channel triplet color tokens: `--color-primary: 10 10 10` (Tailwind
+  `rgb(var(--x) / <alpha>)` setups) and `--background: 222.2 84% 4.9%`
+  (shadcn/ui HSL) now classify as colors and match against hardcoded values.
+- Tailwind class scanning covers `twMerge`/`twJoin` calls (tailwind-merge).
+
 ## [0.2.1] - 2026-08-23
 
 ### Fixed
