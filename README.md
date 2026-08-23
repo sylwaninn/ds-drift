@@ -7,46 +7,9 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 ![node >= 20](https://img.shields.io/badge/node-%E2%89%A5%2020-brightgreen)
 
-`ds-drift` reads the lines a PR adds, compares them against the design tokens you already have, and reports every hardcoded color, off-scale spacing value, and out-of-system component import. Each run produces a drift score from 0 to 100 that fails CI below a threshold you set.
+A coding agent (or a hurried teammate) writes `color: #3b82f6` when `--color-primary` holds that exact value, `margin: 13px` when your scale says 12 or 16, or imports a dialog from a random package instead of your design system. Nothing fails, nobody notices in review, and the design system erodes one PR at a time.
 
-The failure mode it targets is specific: a coding agent (or a hurried teammate) writes `color: #3b82f6` when `--color-primary` holds that exact value, `margin: 13px` when the scale says 12 or 16, or imports a dialog from a random package when the design system ships one. None of that fails a build today, and reviewers rarely catch it.
-
-The CLI runs offline; it has no server component and no telemetry.
-
-![demo](docs/demo.gif)
-<!-- TODO: record demo GIF -->
-
-## Quickstart (30 seconds)
-
-```sh
-pnpm add -D ds-drift        # or: yarn add -D ds-drift / npm i -D ds-drift
-pnpm ds-drift init          # interactive setup: detects your tokens, Tailwind,
-                            # design system packages, and asks for the threshold
-```
-
-`init` inspects the project (token files, `@theme` blocks, `tailwindcss` and Storybook in package.json, design-system-looking dependencies, the origin default branch) and pre-fills every answer; you confirm or adjust, and it writes a commented `ds-drift.config.ts`. Use `--yes` for the non-interactive version with detected defaults, `--force` to overwrite.
-
-The config points at your tokens, either CSS/SCSS custom properties, Sass `$variables`, or [W3C design tokens](https://tr.designtokens.org/format/) JSON:
-
-```ts
-// ds-drift.config.ts
-import { defineConfig } from 'ds-drift'
-
-export default defineConfig({
-  tokens: ['src/styles/tokens.css'],
-  dsPackages: ['@acme/ui', '@acme/ui/*'],
-})
-```
-
-Run it on your branch:
-
-```sh
-pnpm ds-drift               # analyzes lines added since origin/main,
-                            # including uncommitted and untracked work
-pnpm ds-drift --all         # scans whole files instead of the diff
-```
-
-(`yarn ds-drift` and `npx ds-drift` work the same.)
+`ds-drift` compares the lines a PR adds against the design tokens you already have, and turns every drift into a finding and a score:
 
 ```
 src/Button.tsx
@@ -57,9 +20,117 @@ src/Button.tsx
 Drift score: 95/100 (threshold 80)
 ```
 
-## GitHub Action
+It runs offline, has no server component and no telemetry, and works in three places: your terminal, your editor (ESLint plugin), and your CI (PR annotations).
 
-Findings surface as PR annotations through workflow commands. No marketplace action to install:
+![demo](docs/demo.gif)
+<!-- TODO: record demo GIF -->
+
+## Quick start
+
+```sh
+pnpm add -D ds-drift     # or: yarn add -D ds-drift / npm i -D ds-drift
+pnpm ds-drift init
+```
+
+`init` inspects the project and pre-fills every answer; you confirm or override each one. It detects:
+
+- token files by content: CSS/SCSS custom properties, Sass `$variables`, Tailwind v4 `@theme` blocks, W3C token JSON, and JS/TS theme modules containing literal colors;
+- Tailwind and Storybook in your dependencies, design-system-looking packages, and the default branch of `origin`.
+
+It then asks for your fail threshold and writes a commented `ds-drift.config.ts`. Non-interactive version: `ds-drift init --yes` (CI, scripts); `--force` overwrites.
+
+Run it:
+
+```sh
+pnpm ds-drift            # everything added since origin/main, uncommitted work included
+pnpm ds-drift --all      # whole files instead of the diff
+```
+
+Exit codes: `0` score at or above threshold, `1` below, `2` error.
+
+## What it checks
+
+| Rule | Weight | Flags |
+| --- | --- | --- |
+| `color/hardcoded-exact-token` | 5 | A color that duplicates a token exactly |
+| `color/hardcoded-near-token` | 3 | A color perceptually close to a token |
+| `spacing/off-scale` | 2 | A length that misses the spacing scale |
+| `component/off-ds-import` | 4 | A component imported outside the design system |
+
+### Colors
+
+Hex, `rgb()`, and `hsl()` literals are compared against your color tokens. An exact duplicate (alpha included, notation ignored) triggers `hardcoded-exact-token`; a color within CIEDE2000 ΔE < 5 (`colorDeltaE`), typically eyedropped from a screenshot, triggers `hardcoded-near-token` with the nearest token as the suggestion:
+
+```css
+/* tokens: --color-primary: #3B82F6 */
+color: rgb(59, 130, 246);    /* ✖ exact duplicate, different notation */
+color: #3a81f5;              /* ✖ ΔE 0.4 from --color-primary */
+color: var(--color-primary); /* ✔ */
+```
+
+Translucent values whose alpha matches no token are left alone. Named colors (`red`) are not flagged.
+
+### Spacing
+
+`px`/`rem` lengths on spacing properties (`margin*`, `padding*`, `gap`, `inset*`, `top`/`right`/`bottom`/`left`) must sit on the scale derived from your spacing tokens (`spacingTolerancePx`, default 0.5). `1rem` equals `16px`; negative margins compare by magnitude; `0` always passes; React numeric styles count as px (`marginTop: 13`):
+
+```css
+/* tokens: --spacing-2: 0.5rem; --spacing-4: 1rem */
+margin: 13px;   /* ✖ off scale; nearest token is --spacing-4 (16px) */
+margin: 0.5rem; /* ✔ */
+```
+
+`border: 1px` is never flagged: only spacing properties are checked.
+
+### Component imports
+
+With `dsPackages` configured, importing a PascalCase component (named, default, or `* as` namespace) from any other package is flagged. Relative imports and `react`/`react-dom`/`next` never are. Without `dsPackages`, the rule is off.
+
+```tsx
+import { Dialog } from '@radix-ui/themes' // ✖ expected @acme/ui
+import { Dialog } from '@acme/ui'         // ✔
+```
+
+## Your tokens, wherever they live
+
+List any mix of these in `tokens`; they are classified into `color`, `spacing`, and `other`, and are never themselves analyzed for drift:
+
+| Source | Example |
+| --- | --- |
+| CSS/SCSS custom properties | `--color-primary: #3B82F6;` |
+| Bare channel triplets (Tailwind `rgb(var())`, shadcn/ui) | `--color-primary: 10 10 10;` or `222.2 84% 4.9%` |
+| Sass variables | `$color-primary: #3B82F6;` (`!default` handled) |
+| Tailwind v4 `@theme` | plain custom properties, works as is |
+| W3C design tokens JSON | `$value`/`$type`, group inheritance, `{aliases}` |
+| JS/TS theme modules | `export default { colors: { primary: '#3B82F6' } }` |
+
+JS/TS modules are loaded like your config file and walked: token names are dot paths (`colors.primary`), string leaves classify like any other value, and numbers count as px under spacing-ish keys only (`spacing: { 1: 4 }` yes, `fontWeight: 700` no).
+
+## Where it runs
+
+### Terminal
+
+The default mode analyzes everything added since the merge-base with `base`: committed, staged, unstaged, and untracked files. Drift shows up while you work, not after you push.
+
+### Editor (ESLint plugin)
+
+Same rules, same config file, surfaced at typing time:
+
+```js
+// eslint.config.js
+import dsDrift from 'ds-drift/eslint'
+
+export default [
+  // ...your existing config
+  dsDrift.configs.recommended,
+]
+```
+
+Covers `.tsx`/`.jsx`/`.ts`/`.js` (stylesheets stay with the CLI). Exact token duplicates get an editor quick-fix. Each file resolves its nearest ds-drift config (monorepo-friendly) and the rule stays silent in projects that have none. One constraint: a `.mjs` config can't be loaded synchronously, so prefer `.ts`, `.js`, or `.json`.
+
+### CI (GitHub Action)
+
+Findings become PR annotations through workflow commands; nothing extra to install:
 
 ```yaml
 name: ds-drift
@@ -81,122 +152,21 @@ jobs:
       - run: pnpm ds-drift --base origin/${{ github.base_ref }} --format github
 ```
 
-The job fails (exit `1`) when the drift score drops below `failUnder` (default 80).
+The job fails when the score drops below `failUnder`.
 
-## In the editor (ESLint plugin)
+## Day-to-day
 
-CI catches drift after the fact; the plugin puts the squiggle under `#3b82f6` while you type. Same rules, same config file:
-
-```js
-// eslint.config.js
-import dsDrift from 'ds-drift/eslint'
-
-export default [
-  // ...your existing config
-  dsDrift.configs.recommended,
-]
-```
-
-Or wire it manually: `plugins: { 'ds-drift': dsDrift }` with `rules: { 'ds-drift/drift': 'warn' }`.
-
-- Covers `.tsx`, `.jsx`, `.ts`, `.js`; stylesheets stay with the CLI.
-- Exact token duplicates come with an editor quick-fix that rewrites to the token reference.
-- Each linted file resolves its nearest ds-drift config (monorepo-friendly); the rule stays silent in projects that have none. A `.mjs` config can't be loaded synchronously, so use `.ts`, `.js`, or `.json`.
-- `ds-drift-ignore` comments apply, and ESLint's own `eslint-disable` works as usual.
-
-## Autofix
-
-`ds-drift --fix` rewrites every `color/hardcoded-exact-token` finding to its token reference (`var(--color-primary)`, or the `$variable` in SCSS), then re-checks. Exact duplicates are the only mechanical, always-safe rewrite; near-token and off-scale findings need human judgment and are never touched.
-
-## Adopting on a legacy codebase
-
-A first `--all` run on an old codebase can return hundreds of findings and a score of 0. Record the existing drift once; from then on only new drift counts:
+### Fix what's mechanical
 
 ```sh
-pnpm ds-drift --all --update-baseline   # writes .ds-drift.baseline.json
-git add .ds-drift.baseline.json
+pnpm ds-drift --fix
 ```
 
-Runs subtract baselined findings (reported as `N baselined finding(s) hidden`) and the score reflects only the rest. Fingerprints skip line numbers, so moving code never resurfaces an accepted finding; one more occurrence of the same value than the recorded count is reported again. The file path is configurable via `baseline`.
+Rewrites every exact token duplicate to its token reference (`var(--color-primary)`, `$variable` in SCSS), then re-checks. That is the only always-safe rewrite; near-token and off-scale findings need your judgment and are never touched.
 
-## How it works
+### Ignore what's intentional
 
-1. Tokens are read from your `.css`/`.scss` custom properties, Sass `$variables`, and W3C `.json` files, then classified as `color`, `spacing`, or `other`.
-2. Analysis covers the lines added since the merge-base with `base`: committed, staged, unstaged, and untracked files all count, so drift shows up while you work, not after you push. `--all` scans whole files instead. Token source files are never analyzed.
-3. Parsers extract candidate values with exact positions: stylesheet declarations (PostCSS), inline `style={{ ... }}` objects and `styled`/`css`/`keyframes`/`createGlobalStyle` tagged templates (ts-morph), component imports, and (opt-in) Tailwind arbitrary values.
-4. Rules check the candidates, ignore comments are applied, and the findings are scored and reported.
-
-## Rules
-
-| Rule | Default weight | Flags |
-| --- | --- | --- |
-| [`color/hardcoded-exact-token`](#colorhardcoded-exact-token) | 5 | Color that duplicates a token exactly |
-| [`color/hardcoded-near-token`](#colorhardcoded-near-token) | 3 | Color perceptually close to a token |
-| [`spacing/off-scale`](#spacingoff-scale) | 2 | Length not on the spacing scale |
-| [`component/off-ds-import`](#componentoff-ds-import) | 4 | Component imported outside the design system |
-
-### `color/hardcoded-exact-token`
-
-A hardcoded color (hex, `rgb()`, `hsl()`) that duplicates an existing color token exactly. Alpha counts; notation does not.
-
-```css
-/* tokens: --color-primary: #3B82F6 */
-color: #3b82f6;              /* ✖ use var(--color-primary) */
-color: rgb(59, 130, 246);    /* ✖ same color, different notation */
-color: var(--color-primary); /* ✔ */
-```
-
-### `color/hardcoded-near-token`
-
-A hardcoded color within CIEDE2000 ΔE < 5 (configurable via `colorDeltaE`) of a token, typically eyedropped from a screenshot. The nearest token is suggested. Values whose alpha matches no token, like `rgb(59 130 246 / 0.5)` against opaque tokens, are skipped.
-
-```css
-color: #3a81f5; /* ✖ ΔE 0.4 from --color-primary; use var(--color-primary) */
-```
-
-### `spacing/off-scale`
-
-A `px`/`rem` length on a spacing property (`margin*`, `padding*`, `gap`, `inset*`, `top`, `right`, `bottom`, `left`) that misses every value on the scale derived from your spacing tokens (tolerance `spacingTolerancePx`, default 0.5). `1rem` equals `16px`; negative margins are compared by magnitude; `0` always passes. Numeric React style values count as px (`marginTop: 13`).
-
-```css
-/* tokens: --spacing-1: 0.25rem; --spacing-2: 0.5rem; --spacing-4: 1rem */
-margin: 13px;   /* ✖ off scale; nearest token is --spacing-4 (16px) */
-margin: 0.5rem; /* ✔ 8px is on the scale */
-```
-
-### `component/off-ds-import`
-
-A PascalCase component imported from a package outside your `dsPackages` patterns. The rule only runs when `dsPackages` is configured. Relative imports and `react`, `react-dom`, `next` are never flagged.
-
-```tsx
-import { Dialog } from '@radix-ui/themes' // ✖ expected @acme/ui
-import { Dialog } from '@acme/ui'         // ✔
-```
-
-## Tailwind
-
-Set `tailwind: true` in the config (`ds-drift init` offers it when `tailwindcss` is in your dependencies). ds-drift then scans `className`/`class` attributes (string literals and template chunks) and `@apply` directives for arbitrary values, the escape hatch that bypasses your theme:
-
-```tsx
-<div className="bg-[#3b82f6] p-[13px]" />
-{/*              ✖ color rules  ✖ spacing rule                    */}
-<div className="bg-primary p-4" />
-{/*              ✔ theme utilities are already on your scale      */}
-```
-
-Spacing utilities (`p-`, `m-`, `gap-`, `inset-`, negatives, variants like `hover:` or `md:`) map to their CSS property before the spacing rule runs; underscores in bracket values are decoded (`bg-[rgb(59_130_246)]`); opacity modifiers are handled (`bg-[#3b82f6]/50` still duplicates the token, since `bg-primary/50` exists). Lengths on non-spacing utilities (`w-[13px]`, `text-[14px]`) are left alone.
-
-Class strings are found in `className`/`class` attributes (strings, templates, ternaries) and inside builder calls: `clsx`, `classnames`, `cn`, `cx`, `cva`, `tw`, including clsx object keys (`{ 'gap-[7px]': active }`) and cva variant maps.
-
-Tailwind v4 defines the theme as CSS custom properties in an `@theme` block: list that CSS file in `tokens` and both color and spacing rules compare against your actual theme. For a flagged class, the fix is the matching theme utility (`bg-primary`) or a token-based arbitrary value (`bg-(--color-primary)`).
-
-## Sass
-
-`.scss` files are parsed natively (postcss-scss), both as token sources and as analyzed code. Token files can define tokens as `$variables` in addition to custom properties; `!default` flags are stripped, and computed values (`$a * 2`) classify as `other`. Disable with `sass: { variables: false }`. The indented `.sass` syntax is not supported.
-
-## Ignoring findings
-
-Line-level, on the offending line or the line above, with an optional rule id:
+On the line or the line above, optionally scoped to a rule:
 
 ```css
 color: #3b82f6; /* ds-drift-ignore */
@@ -209,70 +179,72 @@ margin: 13px;
 <span style={{ color: '#3a81f5' }} />
 ```
 
-Config-level, with glob patterns and per-rule disabling:
+Or in the config: `ignore` globs and `rules: { 'spacing/off-scale': false }`.
 
-```ts
-ignore: ['**/*.stories.tsx', 'legacy/**'],
-rules: { 'spacing/off-scale': false },
+### Adopt on a legacy codebase
+
+A first `--all` run on an old codebase would score 0 and get the tool disabled within a week. Record the existing drift once; from then on only new drift counts:
+
+```sh
+pnpm ds-drift --all --update-baseline   # writes .ds-drift.baseline.json
+git add .ds-drift.baseline.json
 ```
 
-## Scoring
-
-Each run starts at 100 and subtracts the rule's weight per finding, floored at 0. Tune the weights and the failure threshold to your team's tolerance:
-
-```ts
-failUnder: 80,
-weights: { 'color/hardcoded-exact-token': 10 },
-```
-
-The score is absolute per run: a large PR accumulates more penalty than a small one. Treat it as a budget per change, not a quality percentage, and tune `failUnder` per repository.
+Baselined findings are subtracted from every run (shown as `N baselined finding(s) hidden`). Fingerprints skip line numbers, so moving code never resurfaces an accepted finding.
 
 ## Configuration
 
-`ds-drift.config.ts` / `.js` / `.json` (or a `ds-drift` key in `package.json`), discovered with cosmiconfig. All paths are relative to the config file.
+`ds-drift.config.ts` / `.js` / `.json` (or a `ds-drift` key in `package.json`), discovered with cosmiconfig. Paths are relative to the config file.
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `tokens` | required | Token files: `.css` / `.scss` custom props, W3C `.json` |
-| `base` | `origin/main` | Base ref for `git diff -U0 <base>...HEAD` |
+| `tokens` | required | Token source files (see table above) |
 | `failUnder` | `80` | Exit 1 below this score |
-| `colorDeltaE` | `5` | Max ΔE for `color/hardcoded-near-token` |
-| `spacingTolerancePx` | `0.5` | Snap tolerance for the spacing scale |
-| `weights` | see rules table | Score penalty per rule |
-| `rules` | all enabled | Per-rule enable/disable |
-| `ignore` | `[]` | Glob patterns to skip |
-| `baseline` | `.ds-drift.baseline.json` | Baseline file subtracted from every run |
+| `base` | `origin/main` | Diff base ref |
+| `tailwind` | `false` | Scan Tailwind arbitrary values |
 | `dsPackages` | unset (rule off) | Design system package patterns |
-| `tailwind` | `false` | Scan arbitrary values in class attributes and `@apply` |
+| `ignore` | `[]` | Glob patterns to skip |
+| `rules` | all enabled | Per-rule enable/disable |
+| `weights` | 5 / 3 / 2 / 4 | Score penalty per rule |
+| `colorDeltaE` | `5` | Near-token ΔE threshold |
+| `spacingTolerancePx` | `0.5` | Spacing scale snap tolerance |
+| `baseline` | `.ds-drift.baseline.json` | Baseline file location |
 | `sass` | `{ variables: true }` | Read `$variables` from token files |
 
-## Output formats
+### Tailwind
 
-| Flag | Output |
-| --- | --- |
-| *(default)* | Colorized terminal report grouped by file |
-| `--format json` | Stable, versioned schema (`schemaVersion: 1`): score, summary, findings with weights |
-| `--format github` | GitHub Actions workflow commands, rendered as PR annotations |
+With `tailwind: true`, arbitrary values (the escape hatch that bypasses your theme) are checked in `className`/`class` attributes, in builder calls (`clsx`, `classnames`, `cn`, `cx`, `cva`, `tw`, `twMerge`, `twJoin`, including clsx object keys and cva variant maps), and in `@apply` directives:
 
-Exit codes: `0` score at or above threshold, `1` below threshold, `2` error (bad config, git failure).
+```tsx
+<div className="bg-[#3b82f6] p-[13px]" />  {/* ✖ both flagged   */}
+<div className="bg-primary p-4" />         {/* ✔ theme utilities */}
+```
 
-## Scope and limits
+Variants (`hover:`, `md:`), negatives (`-m-[13px]`), underscores (`rgb(59_130_246)`), and opacity modifiers (`bg-[#3b82f6]/50`) are all handled. Lengths on non-spacing utilities (`w-[13px]`, `text-[14px]`) are left alone. For a flagged class, the fix is the matching theme utility (`bg-primary`) or a token-based arbitrary value (`bg-(--color-primary)`).
 
-- Analyzes `.css`, `.scss`, `.tsx`, `.jsx`. Values built from template interpolations (`${...}`) are skipped.
-- Named colors (`red`, `rebeccapurple`) are not flagged; the color rules target hex, `rgb()`, and `hsl()` notation.
+## Scoring
+
+Each run starts at 100 and subtracts the rule's weight per finding, floored at 0. Below `failUnder`, the exit code is 1. The score is absolute per run: a large PR accumulates more penalty than a small one, so treat it as a budget per change, not a quality percentage.
+
+Machine-readable outputs: `--format json` (stable schema, `schemaVersion: 1`, findings with weights) and `--format github` (workflow commands).
+
+## How it works
+
+1. Tokens are read from your sources and classified.
+2. The diff (or `--all`) selects files and line ranges; token sources, `.d.ts` files, and `ignore` globs are excluded.
+3. Parsers extract candidate values with exact positions: stylesheet declarations (PostCSS), inline `style` objects, `styled`/`css`/`keyframes`/`createGlobalStyle` templates and imports (ts-morph), Tailwind class strings.
+4. Rules check the candidates; ignores and the baseline apply; the result is scored and reported.
+
+## Limits
+
+- Analyzed code: `.css`, `.scss`, `.tsx`, `.jsx`, `.ts`, `.js`. Values built from template interpolations (`${...}`) are skipped.
 - No Vue/Svelte support yet. The `Rule` and parser interfaces are designed for extension; see [CONTRIBUTING.md](./CONTRIBUTING.md).
 
-## Roadmap
-
-Ordered by day-to-day impact, not by novelty:
-
-- Vue and Svelte parsers.
-- Score normalization options for very large changes.
-- A Stylelint companion for pure-CSS editor feedback.
+Roadmap, by day-to-day impact: Vue and Svelte parsers, score normalization for very large changes, a Stylelint companion for pure-CSS editor feedback.
 
 ## Contributing
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md). Requirements: Node >= 20, pnpm, git.
+See [CONTRIBUTING.md](./CONTRIBUTING.md). Node >= 20, pnpm, git.
 
 ## License
 

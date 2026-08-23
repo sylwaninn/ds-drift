@@ -6,6 +6,24 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-23
+
+### Added
+
+- JS/TS theme modules as token sources: `tokens: ['src/design/theme.ts']`
+  loads the module and walks its exports into dot-path tokens
+  (`colors.primary`); numbers count as px under spacing-ish keys only.
+- `ds-drift init` detects JS/TS theme modules (theme/token/palette-named
+  files containing literal colors) alongside CSS/SCSS/JSON sources.
+- Plain `.ts` and `.js` files are analyzed (styled-components templates,
+  class builder calls, imports outside components); `.d.ts` files are
+  excluded.
+
+### Changed
+
+- README restructured around the reader's path: quick start, rules, token
+  sources, where it runs, day-to-day workflows, then reference.
+
 ## [0.3.0] - 2026-08-23
 
 ### Added
