@@ -41,6 +41,19 @@ describe('detectProject', () => {
     expect(detection.base).toBe('origin/main')
   })
 
+  it('detects JS/TS theme modules containing literal colors', async () => {
+    await makeProject()
+    await mkdir(join(dir, 'src/design'), { recursive: true })
+    await writeFile(
+      join(dir, 'src/design/theme.ts'),
+      "export const palette = { a: '#111111', b: '#222222', c: '#333333' }\n",
+    )
+    await writeFile(join(dir, 'src/design/theme-map.ts'), "export const map = { a: 'b' }\n")
+    const detection = await detectProject(dir)
+    expect(detection.tokenFiles).toContain('src/design/theme.ts')
+    expect(detection.tokenFiles).not.toContain('src/design/theme-map.ts') // no literal colors
+  })
+
   it('ranks Tailwind @theme files first', async () => {
     await makeProject()
     await writeFile(

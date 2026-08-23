@@ -45,7 +45,10 @@ const MAX_FILES = 2000
 const MAX_FILE_SIZE = 512 * 1024
 const CUSTOM_PROP_RE = /--[\w-]+\s*:/g
 const SCSS_VAR_RE = /^\s*\$[\w-]+\s*:/gm
+const HEX_RE = /#[0-9a-fA-F]{3,8}\b/g
 const DS_DEP_RE = /design-system|(^@[\w-]+\/(ui|design|components|tokens)$)/
+const JS_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'])
+const JS_THEME_NAME_RE = /theme|token|palette|colou?r|design/i
 
 /** Inspect the project: token file candidates, Tailwind, Storybook, DS deps, base branch. */
 export async function detectProject(cwd: string): Promise<ProjectDetection> {
@@ -109,6 +112,15 @@ async function scanDir(
     } else if (ext === '.json' && /token/i.test(entry.name)) {
       const source = await safeRead(abs)
       if (source !== undefined && source.includes('"$value"')) out.push({ file: rel, score: 50 })
+    } else if (
+      JS_EXTS.has(ext) &&
+      JS_THEME_NAME_RE.test(entry.name) &&
+      !entry.name.endsWith('.d.ts')
+    ) {
+      // A theme-named module with literal colors is a token source candidate.
+      const source = await safeRead(abs)
+      const hexCount = source?.match(HEX_RE)?.length ?? 0
+      if (hexCount >= 3) out.push({ file: rel, score: hexCount })
     }
   }
 }
@@ -281,8 +293,9 @@ export function generateConfig(choices: InitChoices): string {
     `import { defineConfig } from 'ds-drift'`,
     ``,
     `export default defineConfig({`,
-    `  // Design token sources (.css/.scss custom properties or $variables, W3C .json).`,
-    `  // Paths are relative to this file; these files are never analyzed for drift.`,
+    `  // Design token sources: .css/.scss (custom properties, $variables),`,
+    `  // W3C .json, or JS/TS theme modules. Paths are relative to this file;`,
+    `  // these files are never analyzed for drift.`,
     `  tokens: [${tokens}],`,
     ``,
     `  // Exit with code 1 when the drift score (0-100) drops below this.`,
