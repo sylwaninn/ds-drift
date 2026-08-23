@@ -34,11 +34,24 @@ describe('detectProject', () => {
   it('finds token files, Tailwind, Storybook and DS packages', async () => {
     await makeProject()
     const detection = await detectProject(dir)
-    expect(detection.tokenFiles).toEqual(['src/styles/tokens.css'])
+    expect(detection.tokenFiles.map((c) => c.file)).toEqual(['src/styles/tokens.css'])
+    expect(detection.tokenFiles[0]?.hint).toBe('4 token declaration(s)')
     expect(detection.tailwind).toBe(true)
     expect(detection.storybook).toBe(true)
     expect(detection.dsPackages).toEqual(['@acme/ui'])
     expect(detection.base).toBe('origin/main')
+  })
+
+  it('ranks a dedicated token file above a generated bundle embedding a few vars', async () => {
+    await makeProject()
+    const noise = Array.from({ length: 300 }, (_, i) => `.c${i} { color: red; }`).join('\n')
+    await writeFile(
+      join(dir, 'src/styles/app.css'),
+      `:root { --x: 1px; --y: 2px; --z: 3px; }\n${noise}\n`,
+    )
+    const detection = await detectProject(dir)
+    const files = detection.tokenFiles.map((c) => c.file)
+    expect(files.indexOf('src/styles/tokens.css')).toBeLessThan(files.indexOf('src/styles/app.css'))
   })
 
   it('scans hidden design/token directories but not other hidden dirs', async () => {
@@ -49,8 +62,9 @@ describe('detectProject', () => {
     await mkdir(join(dir, '.cache'), { recursive: true })
     await writeFile(join(dir, '.cache/tokens.css'), tokensCss)
     const detection = await detectProject(dir)
-    expect(detection.tokenFiles).toContain('.design-sync/generated/theme-tokens.css')
-    expect(detection.tokenFiles).not.toContain('.cache/tokens.css')
+    const files = detection.tokenFiles.map((c) => c.file)
+    expect(files).toContain('.design-sync/generated/theme-tokens.css')
+    expect(files).not.toContain('.cache/tokens.css')
   })
 
   it('detects JS/TS theme modules containing literal colors', async () => {
@@ -62,8 +76,12 @@ describe('detectProject', () => {
     )
     await writeFile(join(dir, 'src/design/theme-map.ts'), "export const map = { a: 'b' }\n")
     const detection = await detectProject(dir)
-    expect(detection.tokenFiles).toContain('src/design/theme.ts')
-    expect(detection.tokenFiles).not.toContain('src/design/theme-map.ts') // no literal colors
+    const byFile = new Map(detection.tokenFiles.map((c) => [c.file, c.hint]))
+    expect(byFile.get('src/design/theme.ts')).toBe('3 color literal(s)')
+    // No literals, but token-ish name + exports: proposed anyway, labeled as such.
+    expect(byFile.get('src/design/theme-map.ts')).toBe('name match, no literal values found')
+    const files = detection.tokenFiles.map((c) => c.file)
+    expect(files.indexOf('src/design/theme.ts')).toBeLessThan(files.indexOf('src/design/theme-map.ts'))
   })
 
   it('ranks Tailwind @theme files first', async () => {
@@ -73,7 +91,7 @@ describe('detectProject', () => {
       '@theme {\n  --color-primary: #3B82F6;\n}\n',
     )
     const detection = await detectProject(dir)
-    expect(detection.tokenFiles[0]).toBe('src/styles/theme.css')
+    expect(detection.tokenFiles[0]?.file).toBe('src/styles/theme.css')
   })
 
   it('handles a project with nothing to detect', async () => {

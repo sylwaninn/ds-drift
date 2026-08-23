@@ -11,9 +11,16 @@ const exec = promisify(execFile)
 export const CONFIG_FILENAME = 'ds-drift.config.ts'
 
 /** What `ds-drift init` could figure out on its own by inspecting the project. */
+export interface TokenCandidate {
+  /** Relative posix path. */
+  file: string
+  /** Why it was proposed, shown as a hint in the wizard ("38 token declarations"). */
+  hint: string
+}
+
 export interface ProjectDetection {
-  /** Candidate token files (relative posix paths), best match first. */
-  tokenFiles: string[]
+  /** Candidate token files, best match first. */
+  tokenFiles: TokenCandidate[]
   tailwind: boolean
   storybook: boolean
   /** Dependency names that look like a design system package. */
@@ -43,25 +50,27 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'coverage', 'public'
 const MAX_DEPTH = 5
 const MAX_FILES = 2000
 const MAX_FILE_SIZE = 512 * 1024
-const CUSTOM_PROP_RE = /--[\w-]+\s*:/g
+// --tw-* are Tailwind's internal plumbing variables, not design tokens.
+const CUSTOM_PROP_RE = /--(?!tw-)[\w-]+\s*:/g
 const SCSS_VAR_RE = /^\s*\$[\w-]+\s*:/gm
 const HEX_RE = /#[0-9a-fA-F]{3,8}\b/g
+const BARE_TRIPLET_RE = /['"`]\d{1,3}[ ,]+\d{1,3}[ ,]+\d{1,3}['"`]/g
 const DS_DEP_RE = /design-system|(^@[\w-]+\/(ui|design|components|tokens)$)/
 const JS_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'])
-const JS_THEME_NAME_RE = /theme|token|palette|colou?r|design/i
+const TOKEN_NAME_RE = /theme|token|palette|colou?r|design/i
 
 /** Inspect the project: token file candidates, Tailwind, Storybook, DS deps, base branch. */
 export async function detectProject(cwd: string): Promise<ProjectDetection> {
   const deps = await readDependencies(cwd)
   const depNames = Object.keys(deps)
 
-  const ranked: Array<{ file: string; score: number }> = []
+  const ranked: Array<TokenCandidate & { score: number }> = []
   const state = { visited: 0 }
   await scanDir(cwd, cwd, 0, state, ranked)
   ranked.sort((a, b) => b.score - a.score)
 
   return {
-    tokenFiles: ranked.slice(0, 10).map((r) => r.file),
+    tokenFiles: ranked.slice(0, 10).map(({ file, hint }) => ({ file, hint })),
     tailwind: depNames.includes('tailwindcss'),
     storybook: depNames.some((d) => d === 'storybook' || d.startsWith('@storybook/')),
     dsPackages: depNames.filter((d) => DS_DEP_RE.test(d)),
@@ -86,7 +95,7 @@ async function scanDir(
   root: string,
   depth: number,
   state: { visited: number },
-  out: Array<{ file: string; score: number }>,
+  out: Array<TokenCandidate & { score: number }>,
 ): Promise<void> {
   if (depth > MAX_DEPTH || state.visited > MAX_FILES) return
   let entries
@@ -109,33 +118,64 @@ async function scanDir(
     const abs = join(dir, entry.name)
     const rel = relative(root, abs).split(sep).join('/')
     if (ext === '.css' || ext === '.scss') {
-      const score = await scoreStylesheet(abs)
-      if (score > 0) out.push({ file: rel, score })
+      const candidate = await scoreStylesheet(abs, entry.name)
+      if (candidate !== undefined) out.push({ file: rel, ...candidate })
     } else if (ext === '.json' && /token/i.test(entry.name)) {
       const source = await safeRead(abs)
-      if (source !== undefined && source.includes('"$value"')) out.push({ file: rel, score: 50 })
-    } else if (
-      JS_EXTS.has(ext) &&
-      JS_THEME_NAME_RE.test(entry.name) &&
-      !entry.name.endsWith('.d.ts')
-    ) {
-      // A theme-named module with literal colors is a token source candidate.
-      const source = await safeRead(abs)
-      const hexCount = source?.match(HEX_RE)?.length ?? 0
-      if (hexCount >= 3) out.push({ file: rel, score: hexCount })
+      if (source !== undefined && source.includes('"$value"')) {
+        out.push({ file: rel, score: 60, hint: 'W3C design tokens' })
+      }
+    } else if (JS_EXTS.has(ext) && TOKEN_NAME_RE.test(entry.name) && !entry.name.endsWith('.d.ts')) {
+      const candidate = await scoreThemeModule(abs)
+      if (candidate !== undefined) out.push({ file: rel, ...candidate })
     }
   }
 }
 
-/** Token-file likelihood: number of custom properties / $variables, 0 if too few. */
-async function scoreStylesheet(abs: string): Promise<number> {
+/**
+ * Stylesheet likelihood: token declarations weighted by their density in the
+ * file, so a dedicated theme-tokens.css outranks a generated app bundle that
+ * happens to embed a few variables. Token-ish filenames get a bonus.
+ */
+async function scoreStylesheet(
+  abs: string,
+  name: string,
+): Promise<{ score: number; hint: string } | undefined> {
   const source = await safeRead(abs)
-  if (source === undefined) return 0
+  if (source === undefined) return undefined
   const customProps = source.match(CUSTOM_PROP_RE)?.length ?? 0
   const scssVars = abs.endsWith('.scss') ? (source.match(SCSS_VAR_RE)?.length ?? 0) : 0
   const count = customProps + scssVars
-  if (source.includes('@theme')) return count + 100 // Tailwind v4 theme file
-  return count >= 3 ? count : 0
+  const isTheme = source.includes('@theme')
+  if (count < 3 && !isTheme) return undefined
+  const lines = source.split('\n').filter((l) => l.trim() !== '').length || 1
+  let score = count * (count / lines)
+  if (isTheme) score += 100
+  if (TOKEN_NAME_RE.test(name)) score += 50
+  return { score, hint: `${count} token declaration(s)` }
+}
+
+/**
+ * JS/TS theme module likelihood. Literal colors (hex or bare triplets) are the
+ * strong signal; a token-ish filename with exports but no literals is still
+ * proposed, low-ranked and labeled, because the real values may live behind
+ * imports the wizard cannot follow.
+ */
+async function scoreThemeModule(abs: string): Promise<{ score: number; hint: string } | undefined> {
+  const source = await safeRead(abs)
+  if (source === undefined) return undefined
+  const literals = (source.match(HEX_RE)?.length ?? 0) + (source.match(BARE_TRIPLET_RE)?.length ?? 0)
+  if (literals >= 3) {
+    return { score: literals + 50, hint: `${literals} color literal(s)` }
+  }
+  // Name-only fallback: plain modules only. Components (.tsx/.jsx) and hooks
+  // (use-*) match theme-ish names all the time without ever defining tokens.
+  const ext = extname(abs).toLowerCase()
+  const name = abs.split(sep).pop() ?? ''
+  if (ext !== '.tsx' && ext !== '.jsx' && !/^use[-A-Z_.]/.test(name) && /^\s*export\b/m.test(source)) {
+    return { score: 5, hint: 'name match, no literal values found' }
+  }
+  return undefined
 }
 
 async function safeRead(abs: string): Promise<string | undefined> {
@@ -176,7 +216,7 @@ export async function runInit(options: InitOptions): Promise<string> {
 
 function defaultChoices(detection: ProjectDetection): InitChoices {
   return {
-    tokens: detection.tokenFiles.slice(0, 3),
+    tokens: detection.tokenFiles.slice(0, 3).map((c) => c.file),
     failUnder: 80,
     tailwind: detection.tailwind,
     dsPackages: detection.dsPackages.flatMap((d) => [d, `${d}/*`]),
@@ -188,28 +228,25 @@ function defaultChoices(detection: ProjectDetection): InitChoices {
 async function promptChoices(detection: ProjectDetection): Promise<InitChoices> {
   p.intro(pc.bgCyan(pc.black(' ds-drift init ')))
 
-  let tokens: string[]
+  const MANUAL = '__manual__'
+  let tokens: string[] = []
   if (detection.tokenFiles.length > 0) {
-    tokens = guard(
+    const selected = guard(
       await p.multiselect({
         message: 'Token sources (files defining your design tokens)',
-        options: detection.tokenFiles.map((file) => ({ value: file, label: file })),
-        initialValues: detection.tokenFiles.slice(0, 3),
+        options: [
+          ...detection.tokenFiles.map((c) => ({ value: c.file, label: c.file, hint: c.hint })),
+          { value: MANUAL, label: 'Enter another path…', hint: 'type it yourself' },
+        ],
+        initialValues: detection.tokenFiles.slice(0, 3).map((c) => c.file),
         required: false,
       }),
     )
-  } else {
-    tokens = []
+    tokens = selected.filter((value) => value !== MANUAL)
+    if (selected.includes(MANUAL)) tokens.push(...(await promptManualPaths(tokens.length === 0)))
   }
   if (tokens.length === 0) {
-    const manual = guard(
-      await p.text({
-        message: 'Path to your token file (you can add more in the config later)',
-        placeholder: 'src/styles/tokens.css',
-        validate: (v) => (v === undefined || v.trim() === '' ? 'A token file is required.' : undefined),
-      }),
-    )
-    tokens = [manual.trim()]
+    tokens = await promptManualPaths(true)
   }
 
   const failUnder = Number.parseInt(
@@ -262,6 +299,25 @@ async function promptChoices(detection: ProjectDetection): Promise<InitChoices> 
   p.outro(`Config written. Try it: ${pc.cyan('pnpm ds-drift')} (or ${pc.cyan('ds-drift --all')})`)
 
   return { tokens, failUnder, tailwind, dsPackages, ignore, base: detection.base }
+}
+
+/** Free-text token paths, comma separated. `required` blocks empty input. */
+async function promptManualPaths(required: boolean): Promise<string[]> {
+  const raw = guard(
+    await p.text({
+      message: 'Token file path(s), comma separated (.css, .scss, .json, .ts, .js)',
+      placeholder: 'src/styles/tokens.css, src/design/theme.ts',
+      defaultValue: '',
+      validate: (v) =>
+        required && (v === undefined || v.trim() === '')
+          ? 'At least one token file is required.'
+          : undefined,
+    }),
+  )
+  return raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s !== '')
 }
 
 function guard<T>(value: T | symbol): T {
