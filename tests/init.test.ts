@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -78,10 +78,45 @@ describe('detectProject', () => {
     const detection = await detectProject(dir)
     const byFile = new Map(detection.tokenFiles.map((c) => [c.file, c.hint]))
     expect(byFile.get('src/design/theme.ts')).toBe('3 color literal(s)')
-    // No literals, but token-ish name + exports: proposed anyway, labeled as such.
-    expect(byFile.get('src/design/theme-map.ts')).toBe('name match, no literal values found')
+    // No literals, but sits in a design directory: proposed anyway, labeled as such.
+    expect(byFile.get('src/design/theme-map.ts')).toBe('in a design tokens directory')
     const files = detection.tokenFiles.map((c) => c.file)
     expect(files.indexOf('src/design/theme.ts')).toBeLessThan(files.indexOf('src/design/theme-map.ts'))
+  })
+
+  it('proposes files from a design tokens directory even without token-ish names', async () => {
+    await makeProject()
+    await mkdir(join(dir, 'src/design'), { recursive: true })
+    await writeFile(join(dir, 'src/design/spacing.ts'), 'export const spacing = { 1: 4, 2: 8 }\n')
+    const detection = await detectProject(dir)
+    const spacing = detection.tokenFiles.find((c) => c.file === 'src/design/spacing.ts')
+    expect(spacing?.hint).toBe('in a design tokens directory')
+  })
+
+  it('follows workspace symlinks to sibling packages (monorepo)', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'ds-drift-init-'))
+    const app = join(dir, 'apps/web')
+    await mkdir(join(dir, 'packages/shared/src/design'), { recursive: true })
+    await writeFile(
+      join(dir, 'packages/shared/src/design/palette.ts'),
+      "export const palette = { a: '#111111', b: '#222222', c: '#333333' }\n",
+    )
+    await writeFile(join(dir, 'packages/shared/src/design/spacing.ts'), 'export const s = { 1: 4 }\n')
+    await mkdir(join(app, 'node_modules/@acme'), { recursive: true })
+    await writeFile(
+      join(app, 'package.json'),
+      JSON.stringify({ name: 'web', dependencies: { '@acme/shared': 'workspace:*' } }),
+    )
+    await symlink(join(dir, 'packages/shared'), join(app, 'node_modules/@acme/shared'), 'dir')
+
+    const detection = await detectProject(app)
+    const byFile = new Map(detection.tokenFiles.map((c) => [c.file, c.hint]))
+    expect(byFile.get('../../packages/shared/src/design/palette.ts')).toBe(
+      '3 color literal(s) · @acme/shared',
+    )
+    expect(byFile.get('../../packages/shared/src/design/spacing.ts')).toBe(
+      'in a design tokens directory · @acme/shared',
+    )
   })
 
   it('ranks Tailwind @theme files first', async () => {

@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { readdir, readFile, writeFile } from 'node:fs/promises'
+import { readdir, readFile, realpath, writeFile } from 'node:fs/promises'
 import { extname, join, relative, sep } from 'node:path'
 import { promisify } from 'node:util'
 import * as p from '@clack/prompts'
@@ -58,15 +58,30 @@ const BARE_TRIPLET_RE = /['"`]\d{1,3}[ ,]+\d{1,3}[ ,]+\d{1,3}['"`]/g
 const DS_DEP_RE = /design-system|(^@[\w-]+\/(ui|design|components|tokens)$)/
 const JS_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'])
 const TOKEN_NAME_RE = /theme|token|palette|colou?r|design/i
+/** Directories whose whole content is token material (palette.ts, spacing.ts...). */
+const TOKEN_DIR_RE = /(^|\/)(design|design-tokens|tokens?|themes?|foundations?)(\/|$)/i
+const TEST_FILE_RE = /\.(test|spec|stories)\./
 
 /** Inspect the project: token file candidates, Tailwind, Storybook, DS deps, base branch. */
 export async function detectProject(cwd: string): Promise<ProjectDetection> {
+  // Symlinked tmp/workspace layouts: relative paths must share one real base.
+  cwd = await realpath(cwd).catch(() => cwd)
   const deps = await readDependencies(cwd)
   const depNames = Object.keys(deps)
 
   const ranked: Array<TokenCandidate & { score: number }> = []
   const state = { visited: 0 }
   await scanDir(cwd, cwd, 0, state, ranked)
+
+  // Monorepos: tokens often live in a sibling workspace package
+  // (node_modules/@acme/shared symlinked to ../../packages/shared).
+  for (const workspace of await findWorkspacePackages(cwd, depNames)) {
+    const wsCandidates: Array<TokenCandidate & { score: number }> = []
+    await scanDir(workspace.dir, cwd, 0, state, wsCandidates)
+    for (const candidate of wsCandidates) {
+      ranked.push({ ...candidate, hint: `${candidate.hint} · ${workspace.name}` })
+    }
+  }
   ranked.sort((a, b) => b.score - a.score)
 
   return {
@@ -76,6 +91,29 @@ export async function detectProject(cwd: string): Promise<ProjectDetection> {
     dsPackages: depNames.filter((d) => DS_DEP_RE.test(d)),
     base: await detectBase(cwd),
   }
+}
+
+/**
+ * Dependencies that resolve to a directory outside node_modules are linked
+ * workspace packages; their src/ is worth scanning for token files.
+ */
+async function findWorkspacePackages(
+  cwd: string,
+  depNames: string[],
+): Promise<Array<{ name: string; dir: string }>> {
+  const found: Array<{ name: string; dir: string }> = []
+  for (const name of depNames.slice(0, 100)) {
+    try {
+      const real = await realpath(join(cwd, 'node_modules', ...name.split('/')))
+      if (real.includes(`${sep}node_modules${sep}`)) continue
+      const src = join(real, 'src')
+      found.push({ name, dir: existsSync(src) ? src : real })
+    } catch {
+      // not installed or not a resolvable link
+    }
+    if (found.length >= 20) break
+  }
+  return found
 }
 
 async function readDependencies(cwd: string): Promise<Record<string, string>> {
@@ -125,9 +163,12 @@ async function scanDir(
       if (source !== undefined && source.includes('"$value"')) {
         out.push({ file: rel, score: 60, hint: 'W3C design tokens' })
       }
-    } else if (JS_EXTS.has(ext) && TOKEN_NAME_RE.test(entry.name) && !entry.name.endsWith('.d.ts')) {
-      const candidate = await scoreThemeModule(abs)
-      if (candidate !== undefined) out.push({ file: rel, ...candidate })
+    } else if (JS_EXTS.has(ext) && !entry.name.endsWith('.d.ts') && !TEST_FILE_RE.test(entry.name)) {
+      const inTokenDir = TOKEN_DIR_RE.test(rel.slice(0, rel.length - entry.name.length))
+      if (TOKEN_NAME_RE.test(entry.name) || inTokenDir) {
+        const candidate = await scoreThemeModule(abs, inTokenDir)
+        if (candidate !== undefined) out.push({ file: rel, ...candidate })
+      }
     }
   }
 }
@@ -161,19 +202,24 @@ async function scoreStylesheet(
  * proposed, low-ranked and labeled, because the real values may live behind
  * imports the wizard cannot follow.
  */
-async function scoreThemeModule(abs: string): Promise<{ score: number; hint: string } | undefined> {
+async function scoreThemeModule(
+  abs: string,
+  inTokenDir: boolean,
+): Promise<{ score: number; hint: string } | undefined> {
   const source = await safeRead(abs)
   if (source === undefined) return undefined
   const literals = (source.match(HEX_RE)?.length ?? 0) + (source.match(BARE_TRIPLET_RE)?.length ?? 0)
   if (literals >= 3) {
     return { score: literals + 50, hint: `${literals} color literal(s)` }
   }
-  // Name-only fallback: plain modules only. Components (.tsx/.jsx) and hooks
+  // No-literal fallback: plain modules only. Components (.tsx/.jsx) and hooks
   // (use-*) match theme-ish names all the time without ever defining tokens.
   const ext = extname(abs).toLowerCase()
   const name = abs.split(sep).pop() ?? ''
   if (ext !== '.tsx' && ext !== '.jsx' && !/^use[-A-Z_.]/.test(name) && /^\s*export\b/m.test(source)) {
-    return { score: 5, hint: 'name match, no literal values found' }
+    return inTokenDir
+      ? { score: 8, hint: 'in a design tokens directory' }
+      : { score: 5, hint: 'name match, no literal values found' }
   }
   return undefined
 }
