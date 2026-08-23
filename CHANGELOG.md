@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-23
+
 ### Added
 
 - Tailwind support (`tailwind: true`): arbitrary values (`bg-[#3b82f6]`,
