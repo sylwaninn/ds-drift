@@ -4,7 +4,7 @@ import { cac } from 'cac'
 import pc from 'picocolors'
 import { loadConfig } from './config.js'
 import { run } from './engine.js'
-import { init } from './init.js'
+import { runInit } from './init.js'
 import { renderGithub } from './reporters/github.js'
 import { renderJson } from './reporters/json.js'
 import { renderTerminal } from './reporters/terminal.js'
@@ -47,10 +47,13 @@ cli
     if (!result.passed) process.exitCode = 1
   })
 
-cli.command('init', 'Create a commented ds-drift.config.ts').action(async () => {
-  const target = await init(process.cwd())
-  console.log(pc.green(`Created ${target}`))
-})
+cli
+  .command('init', 'Create ds-drift.config.ts (detects tokens, Tailwind, DS packages)')
+  .option('--yes', 'Accept detected defaults without prompting')
+  .option('--force', 'Overwrite an existing config file')
+  .action(async (flags: { yes?: boolean; force?: boolean }) => {
+    await runInit({ cwd: process.cwd(), yes: flags.yes ?? false, force: flags.force ?? false })
+  })
 
 cli.help()
 cli.version(pkg.version)

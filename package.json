@@ -52,6 +52,7 @@
     "css-custom-properties"
   ],
   "dependencies": {
+    "@clack/prompts": "^1.7.0",
     "cac": "^7.0.0",
     "cosmiconfig": "^10.0.0",
     "culori": "^4.0.2",
