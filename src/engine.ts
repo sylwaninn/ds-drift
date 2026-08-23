@@ -32,7 +32,9 @@ export interface RunResult {
 }
 
 export async function run(config: ResolvedConfig, options: RunOptions = {}): Promise<RunResult> {
-  const tokens = await loadTokens(config.tokens, config.rootDir)
+  const tokens = await loadTokens(config.tokens, config.rootDir, {
+    scssVariables: config.sass.variables,
+  })
   const mode = options.all ? 'all' : 'diff'
 
   // Collect target files as { abs, rel } with rel posix-relative to the config root.
@@ -62,12 +64,13 @@ export async function run(config: ResolvedConfig, options: RunOptions = {}): Pro
       !isIgnored(t.rel),
   )
 
+  const parserOptions = { tailwind: config.tailwind.enabled }
   const candidates: Candidate[] = []
   const ignoreMaps = new Map<string, IgnoreMap>()
   for (const target of targets) {
     const source = await readFile(target.abs, 'utf8')
     ignoreMaps.set(target.rel, buildIgnoreMap(source))
-    let fileCandidates = extractCandidates(source, target.rel)
+    let fileCandidates = extractCandidates(source, target.rel, parserOptions)
     if (mode === 'diff') {
       fileCandidates = fileCandidates.filter((c) => isLineChanged(target.ranges, c.line))
     }
@@ -93,10 +96,14 @@ export async function run(config: ResolvedConfig, options: RunOptions = {}): Pro
   return result
 }
 
-function extractCandidates(source: string, rel: string): Candidate[] {
+function extractCandidates(
+  source: string,
+  rel: string,
+  options: { tailwind: boolean },
+): Candidate[] {
   const ext = extname(rel).toLowerCase()
-  if (ext === '.css' || ext === '.scss') return extractCssCandidates(source, rel)
-  return extractTsxCandidates(source, rel)
+  if (ext === '.css' || ext === '.scss') return extractCssCandidates(source, rel, options)
+  return extractTsxCandidates(source, rel, options)
 }
 
 async function walkDir(dir: string, out: string[]): Promise<void> {

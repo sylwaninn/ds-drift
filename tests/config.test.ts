@@ -40,6 +40,20 @@ describe('resolveConfig', () => {
     expect(() => resolveConfig({ tokens: [] }, '/repo')).toThrow(/Invalid ds-drift config/)
   })
 
+  it('normalizes tailwind shorthand and applies sass defaults', () => {
+    expect(resolveConfig({ tokens: ['t.css'] }, '/').tailwind).toEqual({ enabled: false })
+    expect(resolveConfig({ tokens: ['t.css'], tailwind: true }, '/').tailwind).toEqual({
+      enabled: true,
+    })
+    expect(resolveConfig({ tokens: ['t.css'], tailwind: {} }, '/').tailwind).toEqual({
+      enabled: true,
+    })
+    expect(resolveConfig({ tokens: ['t.css'] }, '/').sass).toEqual({ variables: true })
+    expect(resolveConfig({ tokens: ['t.css'], sass: { variables: false } }, '/').sass).toEqual({
+      variables: false,
+    })
+  })
+
   it('rejects unknown rule ids in weights', () => {
     expect(() =>
       resolveConfig({ tokens: ['t.css'], weights: { 'color/nope': 1 } }, '/repo'),

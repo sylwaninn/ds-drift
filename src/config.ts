@@ -43,6 +43,19 @@ const configSchema = z.object({
    * component/off-ds-import only runs when this is set.
    */
   dsPackages: z.array(z.string()).optional(),
+  /**
+   * Tailwind support: scan arbitrary values (bg-[#3b82f6], p-[13px]) in
+   * className/class attributes and @apply directives. `true` is shorthand
+   * for { enabled: true }.
+   */
+  tailwind: z
+    .union([z.boolean(), z.object({ enabled: z.boolean().default(true) })])
+    .transform((v) => (typeof v === 'boolean' ? { enabled: v } : v))
+    .default({ enabled: false }),
+  /** Sass support. `variables`: read `$name: value` from token files as tokens. */
+  sass: z
+    .object({ variables: z.boolean().default(true) })
+    .default({ variables: true }),
 })
 
 /** Shape accepted in ds-drift.config.*; every field except `tokens` is optional. */

@@ -1,5 +1,7 @@
-import { Node, Project, ts, type ObjectLiteralExpression, type SourceFile, type TaggedTemplateExpression } from 'ts-morph'
+import { Node, Project, ts, type JsxAttribute, type ObjectLiteralExpression, type SourceFile, type TaggedTemplateExpression } from 'ts-morph'
 import { camelToKebab, scanValue } from './scan.js'
+import { scanTailwindClasses } from './tailwind.js'
+import type { ParserOptions } from './css.js'
 import type { Candidate } from '../types.js'
 
 let sharedProject: Project | undefined
@@ -19,19 +21,31 @@ function getProject(): Project {
 const STYLED_TAG_RE = /^(styled|css|keyframes|createGlobalStyle)\b/
 const TEMPLATE_PROP_RE = /^\s*([a-zA-Z-]+)\s*:/
 
-/** Extract candidates from TSX/JSX source: imports, inline style objects, styled-components templates. */
-export function extractTsxCandidates(source: string, label: string): Candidate[] {
+/**
+ * Extract candidates from TSX/JSX source: imports, inline style objects,
+ * styled-components templates, and (when enabled) Tailwind class attributes.
+ */
+export function extractTsxCandidates(
+  source: string,
+  label: string,
+  options: ParserOptions = {},
+): Candidate[] {
   const project = getProject()
   const sourceFile = project.createSourceFile(`/virtual/${label}`, source, { overwrite: true })
   try {
     const candidates: Candidate[] = []
     collectImports(sourceFile, label, candidates)
     sourceFile.forEachDescendant((node) => {
-      if (Node.isJsxAttribute(node) && node.getNameNode().getText() === 'style') {
-        const initializer = node.getInitializer()
-        const expression = Node.isJsxExpression(initializer) ? initializer.getExpression() : undefined
-        if (expression !== undefined && Node.isObjectLiteralExpression(expression)) {
-          collectStyleObject(expression, sourceFile, label, candidates)
+      if (Node.isJsxAttribute(node)) {
+        const name = node.getNameNode().getText()
+        if (name === 'style') {
+          const initializer = node.getInitializer()
+          const expression = Node.isJsxExpression(initializer) ? initializer.getExpression() : undefined
+          if (expression !== undefined && Node.isObjectLiteralExpression(expression)) {
+            collectStyleObject(expression, sourceFile, label, candidates)
+          }
+        } else if (options.tailwind === true && (name === 'className' || name === 'class')) {
+          collectClassAttribute(node, sourceFile, label, candidates)
         }
       } else if (Node.isTaggedTemplateExpression(node)) {
         collectTaggedTemplate(node, sourceFile, label, candidates)
@@ -40,6 +54,41 @@ export function extractTsxCandidates(source: string, label: string): Candidate[]
     return candidates
   } finally {
     sourceFile.forget()
+  }
+}
+
+function collectClassAttribute(
+  attribute: JsxAttribute,
+  sourceFile: SourceFile,
+  label: string,
+  out: Candidate[],
+): void {
+  const initializer = attribute.getInitializer()
+  const expression = Node.isJsxExpression(initializer) ? initializer.getExpression() : initializer
+  if (expression === undefined) return
+  const chunks: Array<{ text: string; offset: number }> = []
+  if (Node.isStringLiteral(expression) || Node.isNoSubstitutionTemplateLiteral(expression)) {
+    chunks.push({ text: expression.getLiteralText(), offset: expression.getStart() + 1 })
+  } else if (Node.isTemplateExpression(expression)) {
+    chunks.push({ text: expression.getHead().getLiteralText(), offset: expression.getHead().getStart() + 1 })
+    for (const span of expression.getTemplateSpans()) {
+      const literal = span.getLiteral()
+      chunks.push({ text: literal.getLiteralText(), offset: literal.getStart() + 1 })
+    }
+  }
+  for (const chunk of chunks) {
+    for (const match of scanTailwindClasses(chunk.text)) {
+      const pos = sourceFile.getLineAndColumnAtPos(chunk.offset + match.index)
+      const candidate: Candidate = {
+        kind: match.kind,
+        value: match.value,
+        file: label,
+        line: pos.line,
+        column: pos.column,
+      }
+      if (match.prop !== undefined) candidate.prop = match.prop
+      out.push(candidate)
+    }
   }
 }
 
