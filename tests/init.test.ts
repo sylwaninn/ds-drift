@@ -41,6 +41,18 @@ describe('detectProject', () => {
     expect(detection.base).toBe('origin/main')
   })
 
+  it('scans hidden design/token directories but not other hidden dirs', async () => {
+    await makeProject()
+    const tokensCss = ':root {\n  --a: #111;\n  --b: #222;\n  --c: #333;\n}\n'
+    await mkdir(join(dir, '.design-sync/generated'), { recursive: true })
+    await writeFile(join(dir, '.design-sync/generated/theme-tokens.css'), tokensCss)
+    await mkdir(join(dir, '.cache'), { recursive: true })
+    await writeFile(join(dir, '.cache/tokens.css'), tokensCss)
+    const detection = await detectProject(dir)
+    expect(detection.tokenFiles).toContain('.design-sync/generated/theme-tokens.css')
+    expect(detection.tokenFiles).not.toContain('.cache/tokens.css')
+  })
+
   it('detects JS/TS theme modules containing literal colors', async () => {
     await makeProject()
     await mkdir(join(dir, 'src/design'), { recursive: true })

@@ -98,7 +98,9 @@ async function scanDir(
   for (const entry of entries) {
     if (state.visited++ > MAX_FILES) return
     if (entry.isDirectory()) {
-      if (SKIP_DIRS.has(entry.name) || entry.name.startsWith('.')) continue
+      if (SKIP_DIRS.has(entry.name)) continue
+      // Hidden dirs are skipped except tool-generated token homes (.design-sync/...).
+      if (entry.name.startsWith('.') && !/design|token|theme/i.test(entry.name)) continue
       await scanDir(join(dir, entry.name), root, depth + 1, state, out)
       continue
     }
