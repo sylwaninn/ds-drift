@@ -1,8 +1,15 @@
 import { readFileSync } from 'node:fs'
 import { resolve, extname } from 'node:path'
 import { cssTokensFromSource, loadCssTokens, type CssTokenOptions } from './css.js'
+import { loadJsTokens, loadJsTokensSync } from './js.js'
 import { loadW3cTokens, w3cTokensFromSource } from './w3c.js'
 import type { DesignToken } from './types.js'
+
+const JS_EXTS = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'])
+const UNSUPPORTED = (ext: string, file: string) =>
+  new Error(
+    `Unsupported token file type "${ext}": ${file} (expected .css, .scss, .json, or a JS/TS module)`,
+  )
 
 export type { DesignToken, TokenKind } from './types.js'
 export type { CssTokenOptions } from './css.js'
@@ -22,8 +29,10 @@ export async function loadTokens(
       all.push(...(await loadCssTokens(abs, options)))
     } else if (ext === '.json') {
       all.push(...(await loadW3cTokens(abs)))
+    } else if (JS_EXTS.has(ext)) {
+      all.push(...(await loadJsTokens(abs)))
     } else {
-      throw new Error(`Unsupported token file type "${ext}": ${file} (expected .css, .scss or .json)`)
+      throw UNSUPPORTED(ext, file)
     }
   }
   return all
@@ -43,8 +52,10 @@ export function loadTokensSync(
       all.push(...cssTokensFromSource(readFileSync(abs, 'utf8'), abs, options))
     } else if (ext === '.json') {
       all.push(...w3cTokensFromSource(readFileSync(abs, 'utf8'), abs))
+    } else if (JS_EXTS.has(ext)) {
+      all.push(...loadJsTokensSync(abs))
     } else {
-      throw new Error(`Unsupported token file type "${ext}": ${file} (expected .css, .scss or .json)`)
+      throw UNSUPPORTED(ext, file)
     }
   }
   return all
